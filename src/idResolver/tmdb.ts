@@ -2,10 +2,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import { cachedRemoteSearch, idCache } from './idCache.js';
 
-/**
- * Shared TMDB /find lookup — returns both the numeric ID and the canonical title.
- * Used by resolveTmdbId() (for ID resolution) and resolveTitleFromTmdb() (for title resolution).
- */
+/** TMDB /find lookup: numeric ID and canonical title. */
 function findOnTmdb(imdbId: string, type: 'movie' | 'series') {
   return cachedRemoteSearch(`search:tmdb:${type}:${imdbId}`, () => searchTmdb(imdbId, type));
 }

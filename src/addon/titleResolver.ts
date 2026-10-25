@@ -171,7 +171,7 @@ export async function resolveTitle(
       }
     }
   } else {
-    // Step 1 (Cinemeta) and the Step 2 TVDB lookup need only imdbId and season, so they run together.
+    // Cinemeta and the TVDB episode lookup need only imdbId and season, so run them together.
     const [resolved, tvdbResult] = await Promise.all([
       resolveFromCinemeta(type, imdbId, season),
       type === 'series' && season !== undefined ? resolveEpisodeCountFromTvdb(imdbId, season, episode) : undefined,
@@ -181,7 +181,7 @@ export async function resolveTitle(
     country = resolved.country;
     genres = resolved.genres;
 
-    // Step 2: Episode count + runtime + episode name — prefer TVDB (authoritative for TV) over Cinemeta (fallback)
+    // Episode count, runtime and name: TVDB is authoritative for TV, Cinemeta the fallback.
     episodesInSeason = resolved.episodesInSeason;
     priorSeasonsEpisodeCount = resolved.priorSeasonsEpisodeCount;
     runtime = resolved.runtime;
@@ -198,10 +198,9 @@ export async function resolveTitle(
     }
     console.log(`📌 Title: "${cinemetaTitle}"${year ? ` (${year})` : ''}${country ? ` [${country}]` : ''}${episodesInSeason ? ` — ${episodesInSeason} eps in season` : ''}`);
 
-    // Step 3: Anime detection — database lookup first (authoritative), Cinemeta fallback
+    // Anime detection: database lookup first (authoritative), Cinemeta fallback.
     isAnime = isAnimeByImdbId(imdbId) || !!(country?.includes('Japan') && genres?.some(g => g.toLowerCase() === 'animation'));
 
-    // Step 4: Resolve canonical title
     // For anime: use Kitsu-IMDB title (series-level canonical name), skip TVDB/TMDB
     // (so tvdbNativeTitle never sets for anime; native-language alts via TVDB
     // don't apply to the anime path).
@@ -290,7 +289,7 @@ export async function resolveTitle(
     }
   }
 
-  // Step 5: Resolve runtime — TMDB for movies (if key configured and Cinemeta didn't provide it or for higher accuracy)
+  // Runtime: TMDB for movies, if a key is set and Cinemeta lacks it or for higher accuracy.
   // Skipped on tvdb: requests since TMDB is keyed by IMDB id which isn't
   // available on that path; TVDB record runtime is the authoritative source.
   if (type === 'movie' && tvdbIdHint === undefined) {
@@ -308,7 +307,7 @@ export async function resolveTitle(
     }
   }
 
-  // Step 6: Detect remakes — check if another show shares the same title (for text search filtering)
+  // Remake check: does another show share this title? Affects text search filtering.
   // Empty/whitespace title can happen when both Cinemeta and TVDB fail to
   // resolve; without the trim guard, detectRemake('') hits TMDB with an empty
   // query and returns a 400.
@@ -316,7 +315,7 @@ export async function resolveTitle(
     ? await detectRemake(title)
     : undefined;
 
-  // Step 7: Substring-shortcut alias filter for the zero-result UTS fallback.
+  // Substring-shortcut alias filter for the zero-result UTS fallback.
   // Keeps an alias only when it is a strict substring of the canonical title
   // and substantially shorter (< 70% length ratio). Excludes length-similar
   // variants and longer supplemental aliases that wouldn't help the search.
