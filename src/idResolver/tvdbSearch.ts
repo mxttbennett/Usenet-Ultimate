@@ -61,11 +61,7 @@ export async function detectRemake(title: string): Promise<boolean> {
   }
 }
 
-/**
- * Shared TVDB /search/remoteid lookup — returns both the numeric ID and the canonical title.
- * Used by resolveTvdbId() (for ID resolution) and resolveTitleFromTvdb() (for title resolution).
- * Requires bearer token auth.
- */
+/** TVDB /search/remoteid lookup: numeric ID and canonical title. Needs a bearer token. */
 export function findOnTvdb(imdbId: string, type: 'movie' | 'series') {
   return cachedRemoteSearch(`search:tvdb:${type}:${imdbId}`, () => searchTvdb(imdbId, type));
 }

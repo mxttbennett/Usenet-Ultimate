@@ -41,7 +41,7 @@ export interface ParsedMetadata {
 
 // ── Core parser — calls library once, normalizes all fields ──────────
 
-// Sort comparators and stream builders re-parse the same title many times; cache per title.
+// Sort and stream building re-parse the same titles; cache each parse per title.
 const PARSE_CACHE_LIMIT = 5000;
 const parseCache = new Map<string, ParsedMetadata>();
 
@@ -49,10 +49,7 @@ export function parseMetadata(title: string): ParsedMetadata {
   const cached = parseCache.get(title);
   if (cached) return cached;
 
-  // Strip trailing whitespace + dashes so indexer-mangled titles get their
-  // release group extracted correctly. Scene convention is `-GROUP` at
-  // end-of-title with nothing after; trailing dashes/spaces are always
-  // indexer-side formatting artifacts.
+  // Trailing dashes and spaces are indexer artifacts; strip them so the group parses.
   const cleanedTitle = title.replace(/[\s\-]+$/, '');
   const parsed = parseTorrentTitle(cleanedTitle);
 
@@ -353,7 +350,7 @@ export function parseReleaseGroup(title: string): string {
 
 // ── Clean Title ──────────────────────────────────────────────────────
 
-// Season packs can span several seasons; show the range rather than only the first season.
+// Season packs can span several seasons; show the range, not the first season.
 function seasonLabel(seasons: number[]): string {
   const pad = (n: number) => `S${String(n).padStart(2, '0')}`;
   const sorted = [...seasons].sort((a, b) => a - b);
