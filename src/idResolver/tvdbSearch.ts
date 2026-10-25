@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { config } from '../config/index.js';
-import { idCache } from './idCache.js';
+import { cachedRemoteSearch, idCache } from './idCache.js';
 
 /**
  * Detect if a TV show has a remake/reboot by searching TVDB for shows with the same title.
@@ -61,12 +61,12 @@ export async function detectRemake(title: string): Promise<boolean> {
   }
 }
 
-/**
- * Shared TVDB /search/remoteid lookup — returns both the numeric ID and the canonical title.
- * Used by resolveTvdbId() (for ID resolution) and resolveTitleFromTvdb() (for title resolution).
- * Requires bearer token auth.
- */
-export async function findOnTvdb(
+/** TVDB /search/remoteid lookup: numeric ID and canonical title. Needs a bearer token. */
+export function findOnTvdb(imdbId: string, type: 'movie' | 'series') {
+  return cachedRemoteSearch(`search:tvdb:${type}:${imdbId}`, () => searchTvdb(imdbId, type));
+}
+
+async function searchTvdb(
   imdbId: string,
   type: 'movie' | 'series'
 ): Promise<{ id: number; title: string; year?: string; aliases?: string[]; nativeTitle?: string } | null> {

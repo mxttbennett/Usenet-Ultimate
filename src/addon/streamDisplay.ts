@@ -52,7 +52,8 @@ export function buildStreamDisplay(
     if (data.visualTag !== 'Unknown') tagSpecs.push(`🎨 ${data.visualTag}`);
     if (data.audioTag !== 'Unknown') tagSpecs.push(`🔊 ${data.audioTag}`);
     const tagLine = tagSpecs.length > 0 ? `  ${tagSpecs.join('  ')}` : null;
-    const metaSpecs = [`🏴‍☠️ ${data.releaseGroup}`, `🗂️ ${data.indexer}`];
+    const metaSpecs = data.releaseGroup !== 'Unknown' ? [`🏴‍☠️ ${data.releaseGroup}`] : [];
+    metaSpecs.push(`🗂️ ${data.indexer}`);
     if (data.age) metaSpecs.push(`📅 ${data.age}`);
     const metaLine = `  ${metaSpecs.join('  ')}`;
     const bitrateLine = data.bitrate ? `  📊 ${data.bitrate}` : null;
@@ -61,7 +62,6 @@ export function buildStreamDisplay(
     return { name: streamName, title: streamTitle };
   }
 
-  // Custom config: build from elements and lineGroups
   const valueMap: Record<string, string> = {
     resolution: data.resolutionDisplay,
     quality: data.quality,
@@ -80,7 +80,6 @@ export function buildStreamDisplay(
     bitrate: data.bitrate || '',
   };
 
-  // Build name column
   const nameLines = displayConfig.nameElements
     .filter(id => displayConfig.elements[id]?.enabled)
     .map(id => {
@@ -92,7 +91,6 @@ export function buildStreamDisplay(
     .filter(Boolean);
   const name = nameLines.join('\n');
 
-  // Build title column from line groups
   const titleLines: string[] = [];
   for (const group of displayConfig.lineGroups) {
     const parts: string[] = [];

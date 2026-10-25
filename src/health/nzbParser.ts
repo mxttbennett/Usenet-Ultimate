@@ -32,9 +32,7 @@ export async function downloadAndParseNzb(nzbUrl: string, userAgent: string, ind
   let nzbXml = getCachedNzbContent(nzbUrl);
 
   if (!nzbXml) {
-    // Circuit verification: if the circuit changed since search, skip this
-    // health check entirely rather than hitting the indexer with a mismatched IP.
-    // Throws a tagged error so callers can distinguish it from real failures.
+    // Circuit changed since search: throw a tagged error instead of querying from a mismatched IP.
     try {
       await verifyProxyCircuit(nzbUrl, 'health-check', indexerName, searchExitIp);
     } catch (err) {
@@ -45,7 +43,8 @@ export async function downloadAndParseNzb(nzbUrl: string, userAgent: string, ind
       throw err;
     }
     const response = await proxyFetch(nzbUrl, {
-      headers: { 'User-Agent': userAgent }
+      headers: { 'User-Agent': userAgent },
+      signal: AbortSignal.timeout(30_000),
     }, indexerName);
 
     if (!response.ok) {
