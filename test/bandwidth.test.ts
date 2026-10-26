@@ -1,8 +1,27 @@
-import test, { beforeEach } from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_MBPS, ThroughputSampler, peekBandwidth, recordLiveSample, resetBandwidthState } from '../src/nzbdav/bandwidth.js';
+import { DEFAULT_MBPS, ThroughputSampler, peekBandwidth, recordLiveSample, resetBandwidthState, resolveBandwidth, warmBandwidthProbe } from '../src/nzbdav/bandwidth.js';
 
-beforeEach(() => resetBandwidthState());
+const realFetch = globalThis.fetch;
+let fetchCalls = 0;
+
+beforeEach(() => {
+  resetBandwidthState();
+  fetchCalls = 0;
+});
+afterEach(() => { globalThis.fetch = realFetch; });
+
+const stubFetch = (impl: () => Promise<Response>) => {
+  globalThis.fetch = (async () => { fetchCalls++; return impl(); }) as typeof fetch;
+};
+
+const slowBody = (chunks: number, chunkBytes: number) => new ReadableStream<Uint8Array>({
+  async pull(controller) {
+    await new Promise(r => setTimeout(r, 20));
+    if (chunks-- <= 0) return controller.close();
+    controller.enqueue(new Uint8Array(chunkBytes));
+  },
+});
 
 test('with no data the estimate is the default', () => {
   // Act & Assert
@@ -92,4 +111,84 @@ test('sampler starts a fresh window after each report', () => {
 
   // Assert
   assert.deepEqual(samples, [10, 20]);
+});
+
+test('a successful probe becomes the estimate', async () => {
+  // Arrange
+  stubFetch(async () => new Response(slowBody(2, 3_000_000)));
+
+  // Act
+  await warmBandwidthProbe();
+
+  // Assert
+  const est = peekBandwidth();
+  assert.equal(est.source, 'probe');
+  assert.ok(est.mbps > 0);
+});
+
+test('a fresh probe is not repeated and concurrent warms share one request', async () => {
+  // Arrange
+  stubFetch(async () => new Response(slowBody(2, 3_000_000)));
+
+  // Act
+  await Promise.all([warmBandwidthProbe(), warmBandwidthProbe()]);
+  await warmBandwidthProbe();
+
+  // Assert
+  assert.equal(fetchCalls, 1);
+});
+
+test('a failed, short or errored probe leaves the default in place', async () => {
+  // Arrange
+  const cases: Array<() => Promise<Response>> = [
+    async () => new Response('nope', { status: 503 }),
+    async () => new Response(slowBody(1, 1_000_000)),
+    async () => { throw new Error('offline'); },
+  ];
+
+  for (const impl of cases) {
+    stubFetch(impl);
+
+    // Act
+    await warmBandwidthProbe();
+
+    // Assert
+    assert.equal(peekBandwidth().source, 'default');
+    resetBandwidthState();
+  }
+});
+
+test('resolveBandwidth skips the probe when it already has data', async () => {
+  // Arrange
+  stubFetch(async () => new Response(slowBody(2, 3_000_000)));
+  recordLiveSample(60);
+
+  // Act
+  const est = await resolveBandwidth();
+
+  // Assert
+  assert.deepEqual(est, { mbps: 60, source: 'live' });
+  assert.equal(fetchCalls, 0);
+});
+
+test('resolveBandwidth probes when nothing is known', async () => {
+  // Arrange
+  stubFetch(async () => new Response(slowBody(2, 3_000_000)));
+
+  // Act
+  const est = await resolveBandwidth();
+
+  // Assert
+  assert.equal(est.source, 'probe');
+});
+
+test('resolveBandwidth gives up waiting on a slow probe and returns the default', async () => {
+  // Arrange
+  stubFetch(() => new Promise<Response>(() => {}));
+
+  // Act
+  const est = await resolveBandwidth(undefined, 30);
+
+  // Assert
+  assert.deepEqual(est, { mbps: DEFAULT_MBPS, source: 'default' });
 });

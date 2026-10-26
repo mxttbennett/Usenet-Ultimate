@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { economyMaxBytes, rankEconomyCandidates } from '../src/nzbdav/economyRank.js';
+import { defaultRuntimeSec, economyMaxBytes, rankEconomyCandidates } from '../src/nzbdav/economyRank.js';
 import type { FallbackCandidate } from '../src/nzbdav/types.js';
 
 const GB = 1_000_000_000;
@@ -100,4 +100,11 @@ test('remote season packs are sized per episode; library packs keep their file s
   // Assert
   assert.deepEqual(ordered.map(x => x.title), ['Show.S01.1080p.pack', 'Show.S01.1080p.library', 'Show.S01E01.720p']);
   assert.equal(fitCount, 3);
+});
+
+test('defaultRuntimeSec is episode-length for series and movie-length otherwise', () => {
+  // Act & Assert
+  assert.equal(defaultRuntimeSec('series'), 45 * 60);
+  assert.equal(defaultRuntimeSec('movie'), 110 * 60);
+  assert.equal(defaultRuntimeSec(undefined), 110 * 60);
 });
