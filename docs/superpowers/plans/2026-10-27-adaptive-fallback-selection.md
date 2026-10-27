@@ -59,5 +59,5 @@
 
 - [x] **Step 1: Run the complete test suite and TypeScript build from the repository root.**
 - [x] **Step 2: Review the diff and `git diff --check`; confirm the ranking input remains the filtered result list and no preference bounds are added or bypassed.**
-- [ ] **Step 3: Commit and push the feature branch.**
-- [ ] **Step 4: Open a new PR targeting `matt/economy-own-settings` so it remains separate from PR #9 and does not duplicate PR #9’s changes.**
+- [x] **Step 3: Commit and push the feature branch.**
+- [x] **Step 4: Open a new PR targeting `matt/economy-own-settings` so it remains separate from PR #9 and does not duplicate PR #9’s changes.**
