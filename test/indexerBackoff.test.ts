@@ -66,6 +66,33 @@ test('fallback queries skip an indexer that just returned 429', async () => {
   });
 });
 
+test('an alternate title that hits a 429 stops the next alternate from querying that indexer', async () => {
+  // Arrange
+  const queries: string[] = [];
+  const server = http.createServer((req, res) => {
+    const q = new URL(req.url!, 'http://x').searchParams.get('q') ?? '';
+    queries.push(q);
+    const limited = q.startsWith('Alt One');
+    res.writeHead(limited ? 429 : 200, { 'Content-Type': 'application/xml' });
+    res.end(limited ? ALTHUB_429 : '<rss><channel></channel></rss>');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as { port: number };
+  configData.indexManager = 'newznab';
+  configData.indexers = [{ name: 'AltTitle-429', url: `http://127.0.0.1:${port}/api`, apiKey: 'k', enabled: true, tvSearchMethod: ['text'] }];
+  configData.searchConfig = { includeSeasonPacks: false, includeMultiSeasonPacks: false, absoluteEpisodeFallback: false } as typeof configData.searchConfig;
+
+  try {
+    // Act
+    await indexManagerSearch({ type: 'series', imdbId: 'tt0000032', title: 'Main Title', additionalTitles: ['Alt One', 'Alt Two'], season: 1, episode: 2, isAnime: false });
+
+    // Assert
+    assert.deepEqual(queries.map(q => q.split(' ').slice(0, 2).join(' ')), ['Main Title', 'Alt One']);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+  }
+});
+
 test('a rate-limited indexer is not queried by the next search', async () => {
   await withIndexer(200, '<rss><channel></channel></rss>', async (url, requests) => {
     // Arrange

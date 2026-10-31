@@ -11,9 +11,11 @@ const MAX_WARMED_EPISODES = 60;
 
 // Last time each manifest + episode was prefetched; a repeat inside the cache TTL is skipped.
 const lastPrefetched = new Map<string, number>();
-// One prefetch or refresh at a time, so binge-watching never fans out indexer searches.
-let queue: Promise<void> = Promise.resolve();
-// Refreshes waiting in the queue; a stale entry opened twice is searched once.
+// One background search at a time, so binge-watching never fans out indexer searches; refreshes go before prefetches.
+const refreshes: string[] = [];
+const prefetches: string[] = [];
+let draining = false;
+// Refreshes waiting or running; a stale entry opened twice is searched once.
 const queuedRefreshes = new Set<string>();
 
 // Last time each manifest + season was warmed; a repeat inside the cache TTL is skipped.
@@ -41,14 +43,29 @@ export function schedulePrefetch(url: string): void {
   if (last !== undefined && now - last < config.cacheTTL * 1000) return;
   if (lastPrefetched.size >= MAX_TRACKED) lastPrefetched.clear();
   lastPrefetched.set(url, now);
-  queue = queue.then(() => runPrefetch(url, 'Prefetched next episode'));
+  prefetches.push(url);
+  void drain();
 }
 
 /** Queue a fresh search for `url`, whose stale cached results were just served. */
 export function scheduleRefresh(url: string): void {
   if (queuedRefreshes.has(url)) return;
   queuedRefreshes.add(url);
-  queue = queue.then(() => runPrefetch(url, 'Refreshed stale results').finally(() => queuedRefreshes.delete(url)));
+  refreshes.push(url);
+  void drain();
+}
+
+async function drain(): Promise<void> {
+  if (draining) return;
+  draining = true;
+  for (;;) {
+    const refresh = refreshes.shift();
+    const url = refresh ?? prefetches.shift();
+    if (!url) break;
+    await runPrefetch(url, refresh ? 'Refreshed stale results' : 'Prefetched next episode');
+    if (refresh) queuedRefreshes.delete(refresh);
+  }
+  draining = false;
 }
 
 async function runPrefetch(url: string, label: string): Promise<void> {

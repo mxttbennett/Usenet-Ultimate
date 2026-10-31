@@ -184,7 +184,7 @@ export async function resolveTitle(
     }
   } else {
     // Every lookup here needs only imdbId and season, so they run together; anime discards the canonical title.
-    const tvdbTitleLookup = type === 'series' ? resolveTitleFromTvdb(imdbId, 'series') : undefined;
+    const tvdbTitleLookup = type === 'series' && !isAnimeByImdbId(imdbId) ? resolveTitleFromTvdb(imdbId, 'series') : undefined;
     const tmdbTitleLookup = type === 'movie' ? resolveTitleFromTmdb(imdbId, 'movie') : undefined;
     tmdbRuntimeLookup = tmdbTitleLookup?.then(() => resolveRuntimeFromTmdb(imdbId));
     const [resolved, tvdbResult] = await Promise.all([

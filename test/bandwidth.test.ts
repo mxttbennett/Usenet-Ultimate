@@ -1,6 +1,6 @@
 import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_MBPS, StreamMeasurement, ThroughputSampler, clientNetwork, peekBandwidth, resetBandwidthState, resolveBandwidth, speedScope, warmBandwidthProbe } from '../src/nzbdav/bandwidth.js';
+import { DEFAULT_MBPS, StreamMeasurement, ThroughputSampler, clientNetwork, measurePlayback, peekBandwidth, resetBandwidthState, resolveBandwidth, speedScope, warmBandwidthProbe } from '../src/nzbdav/bandwidth.js';
 
 const realFetch = globalThis.fetch;
 const realLog = console.log;
@@ -167,6 +167,44 @@ test('the log shows the first eight readings of a long stream', () => {
 
   // Assert
   assert.deepEqual(logged, ['📶 Stream speed: Movie.mkv — 10 reading(s) [10, 20, 30, 40, 50, 60, 70, 80, …] Mbps → 90 Mbps']);
+});
+
+test('range requests for one file make one playback, stored when the last one ends', () => {
+  // Arrange
+  const first = measurePlayback(HOME, 'Movie.mkv', T0);
+  const seek = measurePlayback(HOME, 'Movie.mkv', T0 + 60_000);
+
+  // Act
+  first.sample(90, T0 + 8_000);
+  seek.sample(60, T0 + 68_000);
+  seek.sample(55, T0 + 76_000);
+  first.finish(undefined, T0 + 80_000);
+  const whileOpen = logged.length;
+  seek.finish(undefined, T0 + 90_000);
+
+  // Assert
+  assert.equal(first, seek);
+  assert.equal(whileOpen, 0);
+  assert.deepEqual(peekBandwidth(HOME, undefined, T0 + 3 * HOUR), { mbps: 60, source: 'history', streams: 1 });
+});
+
+test('a playback resumed within ten minutes updates its entry instead of adding one', () => {
+  // Arrange
+  const before = measurePlayback(HOME, 'Show.S01E02.mkv', T0);
+  before.sample(40, T0);
+  before.finish(undefined, T0 + 1_000);
+
+  // Act
+  const resumed = measurePlayback(HOME, 'Show.S01E02.mkv', T0 + 5 * 60_000);
+  resumed.sample(70, T0 + 5 * 60_000);
+  resumed.finish(undefined, T0 + 6 * 60_000);
+  const later = measurePlayback(HOME, 'Show.S01E02.mkv', T0 + 30 * 60_000);
+
+  // Assert
+  assert.equal(resumed, before);
+  assert.notEqual(later, before);
+  assert.deepEqual(peekBandwidth(HOME, undefined, T0 + 3 * HOUR), { mbps: 40, source: 'history', streams: 1 });
+  later.finish();
 });
 
 test('a stream with no valid reading is not remembered', () => {

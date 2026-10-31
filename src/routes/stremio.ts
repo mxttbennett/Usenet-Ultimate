@@ -51,15 +51,15 @@ export function createStremioRouter(addon: StremioAddonInterface): Router {
     try {
       const payload = await addon.get('stream', req.params.type, req.params.id, parseExtra(req), {});
       applyCacheHeaders(res, payload);
-      const nextUrl = req.params.type === 'series' && !req.headers[PREFETCH_HEADER] ? nextEpisodeFor(req) : undefined;
-      if (nextUrl) res.on('finish', () => schedulePrefetch(nextUrl));
       const store = requestContext.getStore();
-      if (nextUrl && store?.manifestKey) {
-        res.on('finish', () => warmSeason(selfBaseUrl(), store.pathPrefix || '', store.manifestKey, req.params.type, req.params.id));
-      }
       if (store?.servedStale && store.manifestKey) {
         const url = streamUrl(selfBaseUrl(), store.pathPrefix || '', store.manifestKey, req.params.type, req.params.id);
         res.on('finish', () => scheduleRefresh(url));
+      }
+      const nextUrl = req.params.type === 'series' && !req.headers[PREFETCH_HEADER] ? nextEpisodeFor(req) : undefined;
+      if (nextUrl) res.on('finish', () => schedulePrefetch(nextUrl));
+      if (nextUrl && store?.manifestKey) {
+        res.on('finish', () => warmSeason(selfBaseUrl(), store.pathPrefix || '', store.manifestKey, req.params.type, req.params.id));
       }
       if (payload?.redirect) return res.redirect(307, payload.redirect);
       res.setHeader('Content-Type', 'application/json; charset=utf-8');

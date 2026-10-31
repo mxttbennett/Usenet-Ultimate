@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isIPv4, isIPv6 } from 'node:net';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,7 @@ const HISTORY_MAX_AGE_MS = 90 * DAY_MS;
 const HISTORY_MAX_STREAMS = 100;
 const MIN_STREAMS_PER_WINDOW = 3;
 const LOGGED_READINGS = 8;
+const PLAYBACK_IDLE_MS = 10 * 60 * 1000;
 const HISTORY_WINDOWS: ReadonlyArray<readonly [BandwidthSource, number]> = [['day', DAY_MS], ['week', 7 * DAY_MS], ['month', 30 * DAY_MS]];
 
 export const DEFAULT_MBPS = 25;
@@ -35,6 +36,8 @@ export interface BandwidthEstimate {
 interface StreamSpeed {
   at: number;
   mbps: number;
+  /** The playback that wrote it, so a resumed playback updates its entry instead of adding one. */
+  id?: string;
 }
 
 interface Timed {
@@ -42,12 +45,13 @@ interface Timed {
   at: number;
 }
 
-// One entry per finished stream, so a two-hour movie counts the same as one episode.
+// One entry per playback, so a two-hour movie counts the same as one episode.
 const history = new DiskCache<StreamSpeed[]>(
   path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'config', 'bandwidth-history.json'),
   { schemaVersion: 1, maxEntries: 1000, saveDelayMs: 30_000 },
 );
 const activeStreams = new Set<StreamMeasurement>();
+const playbacks = new Map<string, StreamMeasurement>();
 let probe: Timed | null = null;
 let probeInFlight: Promise<void> | null = null;
 
@@ -73,13 +77,41 @@ export function speedScope(manifestKey: string | undefined, clientIp: string | u
   return createHash('sha256').update(`${manifestKey}|${clientNetwork(clientIp)}`).digest('hex');
 }
 
-/** Tracks one proxied stream: records its saturated readings, logs them and stores the stream's speed when it ends. */
+/** The measurement for one proxied request: requests for the same file on the same network share a playback until it has been idle ten minutes. */
+export function measurePlayback(scope: string | undefined, file: string, now = Date.now()): StreamMeasurement {
+  for (const [key, playback] of playbacks) if (playback.idleMs(now) > PLAYBACK_IDLE_MS) playbacks.delete(key);
+  const key = `${scope ?? ''}|${file}`;
+  const playback = playbacks.get(key);
+  if (playback) {
+    playback.open(now);
+    return playback;
+  }
+  const created = new StreamMeasurement(scope, file, now);
+  playbacks.set(key, created);
+  return created;
+}
+
+/** Tracks one playback across its range requests: records saturated readings, logs them and stores the playback's speed when its last request ends. */
 export class StreamMeasurement {
+  readonly id: string = randomUUID();
   private readonly readings: number[] = [];
+  private openRequests = 1;
+  private lastActivityAt: number;
   lastAt = 0;
 
-  constructor(readonly scope: string | undefined, private readonly label: string) {
+  constructor(readonly scope: string | undefined, private readonly label: string, now = Date.now()) {
+    this.lastActivityAt = now;
     if (scope) activeStreams.add(this);
+  }
+
+  open(now = Date.now()): void {
+    this.openRequests++;
+    this.lastActivityAt = now;
+    if (this.scope) activeStreams.add(this);
+  }
+
+  idleMs(now = Date.now()): number {
+    return this.openRequests > 0 ? 0 : now - this.lastActivityAt;
   }
 
   sample(mbps: number, now = Date.now()): void {
@@ -94,27 +126,30 @@ export class StreamMeasurement {
     return fastestFirst[Math.min(1, fastestFirst.length - 1)] ?? 0;
   }
 
-  finish(fileBytes?: number | null): void {
+  finish(fileBytes?: number | null, now = Date.now()): void {
+    this.openRequests = Math.max(0, this.openRequests - 1);
+    this.lastActivityAt = now;
+    if (this.openRequests > 0) return;
     activeStreams.delete(this);
     if (this.readings.length === 0) return;
     const shown = this.readings.slice(0, LOGGED_READINGS).map(Math.round).join(', ');
     const more = this.readings.length > LOGGED_READINGS ? ', …' : '';
     const size = fileBytes ? `, file ${(fileBytes / 1e9).toFixed(1)} GB` : '';
     console.log(`📶 Stream speed: ${this.label} — ${this.readings.length} reading(s) [${shown}${more}] Mbps → ${Math.round(this.speedMbps())} Mbps${size}`);
-    if (this.scope) appendHistory(this.scope, { at: this.lastAt, mbps: this.speedMbps() });
+    if (this.scope) saveHistory(this.scope, { at: this.lastAt, mbps: this.speedMbps(), id: this.id });
   }
 }
 
-function appendHistory(scope: string, entry: StreamSpeed): void {
-  const kept = (history.get(scope) ?? []).filter(s => entry.at - s.at <= HISTORY_MAX_AGE_MS);
+function saveHistory(scope: string, entry: StreamSpeed): void {
+  const kept = (history.get(scope) ?? []).filter(s => s.id !== entry.id && entry.at - s.at <= HISTORY_MAX_AGE_MS);
   history.set(scope, [...kept, entry].slice(-HISTORY_MAX_STREAMS), HISTORY_MAX_AGE_MS / 1000);
 }
 
 function scopeStreams(scope: string, now: number): StreamSpeed[] {
-  const live = [...activeStreams]
-    .filter(m => m.scope === scope && m.speedMbps() > 0)
-    .map(m => ({ at: m.lastAt, mbps: m.speedMbps() }));
-  return [...(history.get(scope) ?? []), ...live].filter(s => now - s.at <= HISTORY_MAX_AGE_MS);
+  const live = [...activeStreams].filter(m => m.scope === scope && m.speedMbps() > 0);
+  const liveIds = new Set<string>(live.map(m => m.id));
+  const stored = (history.get(scope) ?? []).filter(s => !s.id || !liveIds.has(s.id));
+  return [...stored, ...live.map(m => ({ at: m.lastAt, mbps: m.speedMbps() }))].filter(s => now - s.at <= HISTORY_MAX_AGE_MS);
 }
 
 // The lower quartile: overestimating stalls the stream, while underestimating only costs some quality.
@@ -126,6 +161,7 @@ function lowerQuartile(streams: StreamSpeed[]): number {
 export function resetBandwidthState(): void {
   history.flushAll();
   activeStreams.clear();
+  playbacks.clear();
   probe = null;
   probeInFlight = null;
 }

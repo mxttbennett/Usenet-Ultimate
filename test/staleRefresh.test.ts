@@ -4,7 +4,10 @@ import http from 'node:http';
 import express from 'express';
 import { createStremioRouter } from '../src/routes/stremio.js';
 import { requestContext } from '../src/requestContext.js';
-import { PREFETCH_HEADER, scheduleRefresh } from '../src/addon/prefetch.js';
+import { PREFETCH_HEADER, schedulePrefetch, scheduleRefresh } from '../src/addon/prefetch.js';
+import { config, configData } from '../src/config/index.js';
+import { cache } from '../src/addon/searchResultCache.js';
+import addon, { buildSearchCacheKey } from '../src/addon/index.js';
 
 const quietConsole = { log: console.log, warn: console.warn, error: console.error };
 beforeEach(() => { console.log = console.warn = console.error = () => {}; });
@@ -73,4 +76,54 @@ test('a stream opened twice while stale is refreshed once', async () => {
 
   // Assert
   assert.deepEqual(urls, [url]);
+});
+
+test('a refresh runs before prefetches that were queued earlier', async () => {
+  // Arrange
+  configData.cacheEnabled = true;
+  configData.cacheTTL = 9000;
+  const urls: string[] = [];
+  globalThis.fetch = (async (url: string) => {
+    urls.push(url);
+    await new Promise(r => setTimeout(r, 10));
+    return new Response('{}');
+  }) as typeof fetch;
+  const at = (n: number) => `http://127.0.0.1:1337/k/stream/series/tt0000022:1:${n}.json`;
+
+  // Act
+  schedulePrefetch(at(1));
+  schedulePrefetch(at(2));
+  schedulePrefetch(at(3));
+  scheduleRefresh(at(9));
+  await until(() => urls.length >= 4);
+
+  // Assert
+  assert.deepEqual(urls, [at(1), at(9), at(2), at(3)]);
+});
+
+test('the handler marks a stale cache hit for a refresh and serves a fresh one as is', async () => {
+  // Arrange
+  configData.cacheEnabled = true;
+  configData.cacheTTL = 4 * 60 * 60;
+  configData.indexManager = 'newznab';
+  configData.indexers = [];
+  const seed = (id: string, ageHours: number) => cache.set(buildSearchCacheKey('k', 'series', id, config), {
+    rawResults: [], deprioritizedPacks: [], healthMap: {},
+    _meta: { type: 'series', season: 1, episode: 1, cachedAt: Date.now() - ageHours * 60 * 60 * 1000, releasedAt: '1992-08-19' },
+  }, 24 * 60 * 60);
+  seed('tt0000041:1:1', 5);
+  seed('tt0000042:1:1', 1);
+  const open = async (id: string) => {
+    const store = { manifestKey: 'k', baseUrl: '', pathPrefix: '' } as { manifestKey: string; baseUrl: string; pathPrefix: string; servedStale?: boolean };
+    const payload = await requestContext.run(store, () => addon.get('stream', 'series', id));
+    return { payload, servedStale: store.servedStale };
+  };
+
+  // Act
+  const stale = await open('tt0000041:1:1');
+  const fresh = await open('tt0000042:1:1');
+
+  // Assert
+  assert.deepEqual(stale, { payload: { streams: [] }, servedStale: true });
+  assert.deepEqual(fresh, { payload: { streams: [] }, servedStale: undefined });
 });

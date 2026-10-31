@@ -582,9 +582,10 @@ export async function indexManagerSearch(ctx: SearchContext): Promise<any[]> {
         slog(`⚠️  No text-method indexers, skipping alt-title retry`);
       }
       for (const altTitle of additionalTitles) {
-        if (altIndexers.length === 0) break;
+        const retryableAltIndexers = altIndexers.filter(isRetryable);
+        if (retryableAltIndexers.length === 0) break;
         slog(`🔄 Newznab alt-title retry: "${altTitle}"`);
-        const altPromises = altIndexers.map(async (indexer) => {
+        const altPromises = retryableAltIndexers.map(async (indexer) => {
           const { result, lines } = await withBuffer(async (): Promise<any[]> => {
             return withSubBuffer(`Alt-title retry: "${altTitle}"`, async () => {
               const startTime = Date.now();

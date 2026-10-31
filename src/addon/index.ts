@@ -558,6 +558,9 @@ const streamHandler = async ({ type, id }: { type: string; id: string }) => {
       }, cacheRetentionSeconds(config.cacheTTL));
     } else if (skipEmptyCache && config.cacheEnabled && config.cacheTTL > 0) {
       console.log(`⏭️  Skipping cache write — 0 results for ${type} ${imdbId}`);
+    } else if (shortCircuited && requestContext.getStore()?.background) {
+      // The library answered a refresh, so the stale indexer entry goes and the next open takes the library path.
+      cache.del(cacheKey);
     }
 
     // Create fallback group
