@@ -222,6 +222,33 @@ test('a stream with no valid reading is not remembered', () => {
   assert.deepEqual(logged, []);
 });
 
+test('a window under 1 Mbps is a player that stopped reading, not a reading', () => {
+  // Arrange
+  recordStream(HOME, 60, T0);
+  const stalled = new StreamMeasurement(HOME, 'Seinfeld.S02E01.mkv', T0 + 1_000);
+
+  // Act
+  stalled.sample(0.06, T0 + 4_000);
+  stalled.finish(2_900_000_000, T0 + 10_000);
+
+  // Assert
+  assert.deepEqual(peekBandwidth(HOME, undefined, T0 + 20_000), { mbps: 60, source: 'recent' });
+  assert.equal(logged.some(line => line.includes('Seinfeld.S02E01.mkv')), false);
+});
+
+test('a long playback with only stalled windows raises the estimate from the real speed', () => {
+  // Arrange
+  recordStream(HOME, 60, T0);
+  const stalled = new StreamMeasurement(HOME, 'Movie.mkv', T0 + 1_000);
+
+  // Act
+  stalled.sample(0.06, T0 + 4_000);
+  stalled.finish(undefined, T0 + 3 * 60_000 + 1_000);
+
+  // Assert
+  assert.deepEqual(peekBandwidth(HOME, undefined, T0 + 5 * 60_000), { mbps: 75, source: 'recent' });
+});
+
 test('only the latest hundred streams are kept per scope', () => {
   // Arrange
   for (let i = 0; i < 101; i++) recordStream(HOME, i === 0 ? 1 : 100, T0 - (101 - i) * 60_000 - 3 * HOUR);
