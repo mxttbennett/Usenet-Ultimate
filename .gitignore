@@ -10,7 +10,6 @@ ui/build/
 # Environment variables
 .env
 .env.local
-CLAUDE.local.md
 
 # IDE
 .vscode/
