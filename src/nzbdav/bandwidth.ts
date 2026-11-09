@@ -12,7 +12,7 @@ const PROBE_TTL_MS = 12 * 60 * 60 * 1000;
 const FIRST_SAMPLE_WINDOW_MS = 3_000;
 const SAMPLE_WINDOW_MS = 8_000;
 const SATURATED_BACKLOG_BYTES = 256 * 1024;
-// A full backlog with almost nothing sent means the player stopped reading, not a slow link.
+// A full backlog with almost nothing sent is a player that stopped reading.
 const MIN_LINK_MBPS = 1;
 const EXPLORE_MIN_PLAYBACK_MS = 2 * 60 * 1000;
 const EXPLORE_STEP = 1.25;
